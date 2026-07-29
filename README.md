@@ -220,9 +220,7 @@ Os providers são pacotes de integração que adicionam hooks, operators e senso
 | Provider   | O que adiciona                                                        |
 |------------|-----------------------------------------------------------------------|
 | `amazon`   | Integração AWS (S3, etc.) — é com ele que as DAGs falam com o MinIO   |
-| `slack`    | Envio de notificações/alertas para canais do Slack                    |
 | `postgres` | `PostgresHook`/operators SQL — consultas no Postgres (ex.: `transacao`) |
-| `redis`    | Hooks e sensors para o Redis                                          |
 
 Na IDE, selecione `./venv/bin/python` como interpretador do projeto para o
 autocomplete passar a enxergar esses pacotes.
