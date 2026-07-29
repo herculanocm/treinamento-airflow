@@ -1,6 +1,6 @@
 -- Script de configuração do banco de exemplo do treinamento.
 -- Executado automaticamente pelo Postgres na PRIMEIRA subida do volume
--- (via /docker-entrypoint-initdb.d) e reexecutado pelo start.sh/start.cmd
+-- (via /docker-entrypoint-initdb.d) e reexecutado pelo start.sh
 -- a cada subida. É idempotente: só cria/popula o que ainda não existe.
 
 SELECT 'CREATE DATABASE banco'

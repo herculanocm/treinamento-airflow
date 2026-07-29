@@ -8,11 +8,11 @@ com CeleryExecutor (Postgres + Redis) e MinIO como storage compatível com S3.
 ```
 .
 ├── docker-compose.yaml
-├── start.sh / start.cmd  # inicia todo o ambiente (Linux-WSL / Windows)
-├── stop.sh / stop.cmd    # força a parada de todo o ambiente
+├── start.sh              # inicia todo o ambiente (Linux-WSL)
+├── stop.sh               # força a parada de todo o ambiente (Linux-WSL)
 ├── .env                  # AIRFLOW_UID e imagem do Airflow
-├── postgres-init/        # scripts SQL da 1ª inicialização (banco de exemplo)
-├── api/                  # API Node/Express que recebe os totais por tipo
+├── postgres-init/        # scripts SQL do banco de exemplo (idempotente)
+├── api/                  # API Node/Express dos exercícios (totais, avisos e falhas)
 ├── scripts/              # scripts auxiliares (ex.: trigger remoto de DAGs via REST API)
 ├── venv/                 # ambiente Python local (opcional, ver seção abaixo)
 └── airflow/
@@ -25,15 +25,14 @@ com CeleryExecutor (Postgres + Redis) e MinIO como storage compatível com S3.
 ## Subindo o ambiente
 
 ```bash
-./start.sh        # Linux / WSL
-start.cmd         # Windows (prompt de comando)
+./start.sh
 ```
 
 Na primeira subida o serviço `airflow-init` roda automaticamente (migração do
 banco + criação do usuário admin) antes dos demais serviços. Além de subir os
-containers, o start aguarda o Postgres ficar pronto e **garante o banco de
-exemplo**: se o database `banco` ou a tabela `transacao` não existirem, cria e
-popula automaticamente.
+containers, o start aguarda o Postgres ficar pronto e **reaplica o script
+idempotente do banco de exemplo**: cria o database `banco` e as tabelas que
+faltarem, e só popula a `transacao` se estiver vazia.
 
 Também funciona subir diretamente com `docker compose up -d` — nesse caso o
 banco de exemplo é criado apenas na primeira inicialização do volume (via
@@ -42,12 +41,11 @@ banco de exemplo é criado apenas na primeira inicialização do volume (via
 ## Parando o ambiente
 
 ```bash
-./stop.sh         # Linux / WSL
-stop.cmd          # Windows (prompt de comando)
+./stop.sh
 ```
 
-Os scripts de stop forçam a parada de todos os containers (timeout de 5s),
-preservando os dados nos volumes.
+O script força a parada de todos os containers (timeout de 5s), preservando
+os dados nos volumes.
 
 ```bash
 # Acompanhar os logs
@@ -83,14 +81,47 @@ São gerados **~200 mil registros aleatórios** distribuídos por todo o ano de
 2025. Dentro do compose, acesse em `postgres:5433`; da máquina host, em
 `localhost:5433` (`postgres`/`postgres`).
 
-A DAG de exemplo `exemplo_hello_airflow` já vem em `airflow/dags/` — despause ela na UI
-para validar que o ambiente está funcionando.
+O script também cria a tabela **`transacao_parceiro_status`** (PK composta
+`dt_referencia` + `tipo`), alimentada pela DAG 7: guarda o valor apurado no
+dia e se o envio para a API concluiu com sucesso (`status` true/false).
 
-## API de totais por tipo
+## DAGs do treinamento
+
+Todas as DAGs estão com `schedule_interval=None` — nada roda sozinho. Despause
+a DAG na UI e dispare manualmente (Trigger DAG), pela CLI ou pela REST API.
+
+| DAG                                   | O que demonstra                                                             |
+|---------------------------------------|------------------------------------------------------------------------------|
+| `1_hello_airflow` … `6_tasks_aurora1` | Básicos: hello world, encadeamento e reuso de tasks, paralelismo, Postgres   |
+| `7_tasks_aurora_api`                  | Totais por tipo → POST na API + upsert de status com `BranchPythonOperator`  |
+| `8_tasks_trigger_params`              | Parâmetros via Trigger w/ config: branch → aviso na API ou CSV no MinIO      |
+| `9_tasks_bulk_insert`                 | Bulk insert (COPY) de CSV do MinIO + post positivo/negativo via `trigger_rule` |
+| `10_tasks_trigger_dag`                | `TriggerDagRunOperator`: dispara a DAG 8 uma vez por tipo                    |
+| `11_tasks_reprocessa_dias`            | Reprocessa os últimos 5 dias (logical_date deslocado) + `on_failure_callback` |
+
+## Conexões do Airflow
+
+As DAGs 6 a 11 dependem de duas conexões, criadas via CLI. Elas ficam no banco
+de metadados do Airflow — um `docker compose down -v` as apaga; recrie com:
+
+```bash
+# Postgres do banco de exemplo
+docker compose exec airflow-webserver airflow connections add aurora_postgres_banco_master \
+  --conn-type postgres --conn-host postgres --conn-port 5433 \
+  --conn-schema banco --conn-login postgres --conn-password postgres
+
+# MinIO como S3
+docker compose exec airflow-webserver airflow connections add minio_s3 \
+  --conn-type aws --conn-login admin --conn-password password \
+  --conn-extra '{"endpoint_url": "http://minio:9000", "region_name": "us-east-1"}'
+```
+
+## API do treinamento (Node/Express)
 
 O serviço `api-treinamento` ([api/](api/)) é uma API Node.js/Express usada nos
-exercícios: as DAGs calculam os totais por `tipo` da tabela `transacao` e
-enviam o resultado via POST. Os dados ficam **em memória** (são perdidos ao
+exercícios: recebe das DAGs os totais por `tipo` da tabela `transacao`, avisos
+(ex.: dia sem transações) e notificações de falha de tasks
+(`on_failure_callback`). Os dados ficam **em memória** (são perdidos ao
 reiniciar o container).
 
 Dentro do compose as DAGs acessam em `http://api-treinamento:3000`; da máquina
@@ -113,6 +144,16 @@ O campo `tipo` aceita as mesmas categorias da tabela: `pagamento`,
 curl -X POST http://localhost:3000/api/v1/total-tipo \
   -H 'Content-Type: application/json' \
   -d '{"tipo": "pagamento", "valor": 1234.56, "data": "2025-06-15"}'
+```
+
+## Acionando DAGs remotamente
+
+O script [scripts/trigger_dag9.py](scripts/trigger_dag9.py) dispara a DAG 9
+pela REST API do Airflow (basic auth `airflow`/`airflow`), passando o
+`pathkey` no conf — o mesmo endpoint que o botão Trigger da UI usa:
+
+```bash
+venv/bin/python scripts/trigger_dag9.py entrada/transacoes_novas.csv
 ```
 
 ## Ambiente de desenvolvimento (Python local)
@@ -154,8 +195,8 @@ source ./venv/bin/activate
   instalação Python isolada do sistema, onde as dependências do projeto não
   conflitam com as de outros projetos.
 - `source ./venv/bin/activate` — ativa o ambiente no shell atual: `python` e
-  `pip` passam a apontar para o venv. Para sair, use `deactivate`. (Se o
-  projeto for versionado, a pasta `venv/` deve ir para o `.gitignore`.)
+  `pip` passam a apontar para o venv. Para sair, use `deactivate`. (A pasta
+  `venv/` já está no `.gitignore` do projeto.)
 
 ### 3. Instalar o Airflow e os providers
 
@@ -192,7 +233,8 @@ autocomplete passar a enxergar esses pacotes.
 # Parar tudo (mantém os dados)
 docker compose down
 
-# Parar tudo e apagar volumes (reset completo do banco e do MinIO)
+# Parar tudo e apagar volumes (reset completo: banco, MinIO e metadados do
+# Airflow — inclusive as conexões, que precisam ser recriadas; ver seção acima)
 docker compose down -v
 
 # CLI do Airflow (profile debug)

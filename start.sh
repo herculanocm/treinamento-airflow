@@ -15,17 +15,11 @@ for i in $(seq 1 60); do
     sleep 2
 done
 
-# Garante o banco de exemplo: se o database "banco" ou a tabela "transacao"
-# não existirem, o script idempotente cria e popula (~200 mil registros)
-tabela_ok=$(docker compose exec -T postgres psql -U postgres -p 5433 -d banco -tAc \
-    "SELECT to_regclass('public.transacao') IS NOT NULL" 2>/dev/null || echo f)
-if [[ "$tabela_ok" == "t" ]]; then
-    echo "=== Banco de exemplo OK (database 'banco' e tabela 'transacao' ja existem)"
-else
-    echo "=== Criando database 'banco' e tabela 'transacao' (~200 mil registros)..."
-    docker compose exec -T postgres psql -U postgres -p 5433 -v ON_ERROR_STOP=1 \
-        -f /docker-entrypoint-initdb.d/init-banco.sql
-fi
+# Garante o banco de exemplo reaplicando o script idempotente: cria o database
+# "banco" e as tabelas que faltarem; só popula a transacao se estiver vazia
+echo "=== Garantindo o banco de exemplo (script idempotente)..."
+docker compose exec -T postgres psql -U postgres -p 5433 -v ON_ERROR_STOP=1 \
+    -f /docker-entrypoint-initdb.d/init-banco.sql
 
 echo
 echo "=== Ambiente no ar!"
