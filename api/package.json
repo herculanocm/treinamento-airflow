@@ -1,0 +1,12 @@
+{
+  "name": "api-treinamento",
+  "version": "1.0.0",
+  "description": "API do treinamento que recebe os totais por tipo calculados pelas DAGs do Airflow",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

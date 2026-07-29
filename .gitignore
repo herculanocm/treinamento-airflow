@@ -1,0 +1,12 @@
+# Ambiente virtual Python local (ver README)
+venv/
+
+# Bytecode Python
+__pycache__/
+*.py[cod]
+
+# Logs gerados pelos containers do Airflow
+airflow/logs/
+
+# Dependências da API Node (instaladas no build da imagem)
+api/node_modules/
